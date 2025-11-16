@@ -1,3 +1,5 @@
+import base64
+from pathlib import Path
 from typing import Dict
 
 import pytest
@@ -5,6 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
+
+import sys
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.database import Base, get_db
 from app.main import app
@@ -27,6 +33,9 @@ def override_get_db():
 def setup_module(_):
     Base.metadata.create_all(bind=TEST_ENGINE)
     app.dependency_overrides[get_db] = override_get_db
+    import app.main as main_module
+
+    main_module.SessionLocal = TestingSessionLocal
 
 
 @pytest.fixture(autouse=True)
@@ -42,11 +51,14 @@ def login_host(client: TestClient) -> Dict:
     return response.json()
 
 
-def create_session(client: TestClient, token: str) -> Dict:
+def create_session(client: TestClient, token: str, max_duration: int | None = None) -> Dict:
+    payload = {"host_name": "Host"}
+    if max_duration is not None:
+        payload["max_media_duration_seconds"] = max_duration
     response = client.post(
         "/sessions",
         headers={"X-User-Token": token},
-        json={"host_name": "Host"},
+        json=payload,
     )
     assert response.status_code == 200
     return response.json()
@@ -54,6 +66,33 @@ def create_session(client: TestClient, token: str) -> Dict:
 
 def join_guest(client: TestClient, code: str) -> Dict:
     response = client.post(f"/sessions/{code}/join", json={"guest_name": "Guest"})
+    assert response.status_code == 200
+    return response.json()
+
+
+def upload_track(
+    client: TestClient,
+    session_id: str,
+    token: str,
+    track_id: str,
+    name: str,
+    duration_seconds: int = 30,
+) -> Dict:
+    payload = {
+        "track_id": track_id,
+        "name": name,
+        "duration_seconds": duration_seconds,
+        "media": {
+            "filename": f"{track_id}.mp3",
+            "content_type": "audio/mpeg",
+            "data": base64.b64encode(b"dummy-bytes").decode(),
+        },
+    }
+    response = client.post(
+        f"/sessions/{session_id}/playlist",
+        headers={"X-User-Token": token},
+        json=payload,
+    )
     assert response.status_code == 200
     return response.json()
 
@@ -67,17 +106,20 @@ def test_guest_request_flow():
     host_headers = {"X-User-Token": host["token"]}
     guest_headers = {"X-User-Token": guest["guest_token"]}
 
-    add_resp = client.post(
+    upload_track(client, session["session_id"], host["token"], "t1", "Alpha")
+    upload_track(client, session["session_id"], host["token"], "t2", "Beta")
+
+    playlist = client.get(
         f"/sessions/{session['session_id']}/playlist",
         headers=host_headers,
-        json={"track_id": "t1", "title": "Alpha", "artist": "Artist"},
-    )
-    assert add_resp.status_code == 200
+    ).json()
+    assert len(playlist) == 2
+    second_item = next(item for item in playlist if item["track_id"] == "t2")
 
     req_resp = client.post(
-        f"/sessions/{session['session_id']}/playlist",
+        f"/sessions/{session['session_id']}/requests",
         headers=guest_headers,
-        json={"track_id": "t2", "title": "Beta", "artist": "Artist"},
+        json={"request_type": "reorder", "payload": {"item_id": second_item["id"], "new_position": 0}},
     )
     request = req_resp.json()
     assert request["status"] == "pending"
@@ -86,12 +128,11 @@ def test_guest_request_flow():
     assert approval.status_code == 200
     assert approval.json()["status"] == "approved"
 
-    playlist = client.get(
+    updated = client.get(
         f"/sessions/{session['session_id']}/playlist",
         headers=host_headers,
     ).json()
-    assert len(playlist) == 2
-    assert playlist[1]["track_id"] == "t2"
+    assert updated[0]["track_id"] == "t2"
 
 
 def test_playback_updates_and_custom_request():
@@ -103,11 +144,7 @@ def test_playback_updates_and_custom_request():
     host_headers = {"X-User-Token": host["token"]}
     guest_headers = {"X-User-Token": guest["guest_token"]}
 
-    client.post(
-        f"/sessions/{session['session_id']}/playlist",
-        headers=host_headers,
-        json={"track_id": "song-1", "title": "Song", "artist": "Band"},
-    )
+    upload_track(client, session["session_id"], host["token"], "song-1", "Song")
 
     playback = client.post(
         f"/sessions/{session['session_id']}/playback",
@@ -142,11 +179,12 @@ def test_websocket_broadcast_flow():
     guest = join_guest(client, session["code"])
 
     host_headers = {"X-User-Token": host["token"]}
-    client.post(
+    upload_track(client, session["session_id"], host["token"], "track-1", "Song")
+    playlist = client.get(
         f"/sessions/{session['session_id']}/playlist",
         headers=host_headers,
-        json={"track_id": "track-1", "title": "Song", "artist": "Artist"},
-    )
+    ).json()
+    first_item_id = playlist[0]["id"]
 
     with client.websocket_connect(
         f"/ws/sessions/{session['session_id']}?token={host['token']}"
@@ -176,8 +214,8 @@ def test_websocket_broadcast_flow():
             {
                 "type": "request_playlist_change",
                 "payload": {
-                    "request_type": "add",
-                    "payload": {"track_id": "track-2", "title": "Beta", "artist": "B"},
+                    "request_type": "reorder",
+                    "payload": {"item_id": first_item_id, "new_position": 0},
                 },
             }
         )
@@ -185,3 +223,25 @@ def test_websocket_broadcast_flow():
         host_request = host_ws.receive_json()
         assert guest_request["type"] == host_request["type"] == "request_update"
         assert guest_request["payload"]["status"] == "pending"
+
+
+def test_upload_respects_duration_limit():
+    client = TestClient(app)
+    host = login_host(client)
+    session = create_session(client, host["token"], max_duration=10)
+
+    response = client.post(
+        f"/sessions/{session['session_id']}/playlist",
+        headers={"X-User-Token": host["token"]},
+        json={
+            "track_id": "long",
+            "name": "Long Track",
+            "duration_seconds": 45,
+            "media": {
+                "filename": "long.mp3",
+                "content_type": "audio/mpeg",
+                "data": base64.b64encode(b"dummy").decode(),
+            },
+        },
+    )
+    assert response.status_code == 400

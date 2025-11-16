@@ -129,6 +129,17 @@
                 Session title
                 <input type="text" name="host_name" placeholder="Friday Jam" required />
               </label>
+              <label>
+                Max track length (seconds)
+                <input
+                  type="number"
+                  name="max_media_duration_seconds"
+                  min="10"
+                  step="5"
+                  placeholder="300"
+                />
+              </label>
+              <p class="help-text">Leave blank for unlimited uploads.</p>
               <button type="submit">Create session</button>
             </form>
           </fieldset>
@@ -179,13 +190,26 @@
                 <input type="text" name="track_id" placeholder="track-123" required />
               </label>
               <label>
-                Title
-                <input type="text" name="title" placeholder="Future Funk" required />
+                Track name
+                <input type="text" name="name" placeholder="Future Funk" required />
               </label>
-              <label>
-                Artist
-                <input type="text" name="artist" placeholder="Neon Tiger" required />
+              <label class="file-picker">
+                Upload media
+                <input
+                  type="file"
+                  id="media-file-input"
+                  name="media_file"
+                  accept="audio/mpeg,video/mp4,.mp3,.mp4"
+                  required
+                />
               </label>
+              <input type="hidden" name="duration_seconds" id="duration-seconds-input" />
+              <p class="help-text" id="detected-duration-copy">
+                Select a file to auto-detect its runtime.
+              </p>
+              <p class="help-text">
+                Max allowed length: <strong id="max-duration-copy">No limit</strong>
+              </p>
               <button type="submit">Add track</button>
             </form>
             <form id="guest-request-form" class="stacked">
@@ -221,6 +245,38 @@
             </form>
           </fieldset>
         </div>
+        <div class="player-wrapper">
+          <div class="player-card" id="player-shell">
+            <div class="player-card__header">
+              <div>
+                <p class="player-label">Now playing</p>
+                <h3 id="player-track-name">Upload a track to begin</h3>
+                <p id="player-track-meta" class="player-meta">No track loaded</p>
+              </div>
+              <span class="player-duration-chip" id="player-duration-chip">--</span>
+            </div>
+            <div class="player-controls">
+              <button type="button" class="icon-button" id="player-prev" aria-label="Previous track">
+                ⏮
+              </button>
+              <button type="button" class="icon-button" id="player-play" aria-label="Play">
+                ▶️
+              </button>
+              <button type="button" class="icon-button" id="player-pause" aria-label="Pause">
+                ⏸
+              </button>
+              <button type="button" class="icon-button" id="player-next" aria-label="Next track">
+                ⏭
+              </button>
+            </div>
+            <div class="player-progress">
+              <span id="player-current-time">0:00</span>
+              <input type="range" id="player-seek" min="0" max="0" value="0" />
+              <span id="player-duration">0:00</span>
+            </div>
+          </div>
+          <audio id="media-player" class="sr-only" preload="metadata"></audio>
+        </div>
         <div class="data-grid">
           <div>
             <h3>Playlist</h3>
@@ -229,8 +285,8 @@
                 <tr>
                   <th>#</th>
                   <th>Track</th>
-                  <th>Artist</th>
-                  <th>ID</th>
+                  <th>Duration</th>
+                  <th>Type</th>
                 </tr>
               </thead>
               <tbody id="playlist-body"></tbody>

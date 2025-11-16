@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+try:  # pragma: no cover - optional dependency
+    from mutagen import File as MutagenFile
+except Exception:  # pragma: no cover - fall back to hints
+    MutagenFile = None
 from sqlalchemy.orm import Session
 
 from .database import SessionLocal, get_db, init_db
@@ -50,6 +59,15 @@ from .services import (
 init_db()
 
 BASE_DIR = Path(__file__).resolve().parent
+UPLOAD_DIR = BASE_DIR / "static" / "uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_MEDIA_TYPES = {
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "video/mp4": ".mp4",
+    "audio/mp4": ".mp4",
+}
+ALLOWED_MEDIA_EXTENSIONS = {".mp3", ".mp4"}
 
 app = FastAPI(title="Collaborative Music Player")
 app.add_middleware(
@@ -93,6 +111,40 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+def resolve_media_extension(filename: str, content_type: str | None) -> str:
+    content_type = (content_type or "").lower()
+    if content_type in ALLOWED_MEDIA_TYPES:
+        return ALLOWED_MEDIA_TYPES[content_type]
+    suffix = Path(filename or "").suffix.lower()
+    if suffix in ALLOWED_MEDIA_EXTENSIONS:
+        return suffix
+    raise HTTPException(status_code=415, detail="Only MP3 or MP4 uploads are supported")
+
+
+def persist_media_bytes(content: bytes, extension: str) -> tuple[str, Path]:
+    filename = f"{uuid4().hex}{extension}"
+    destination = UPLOAD_DIR / filename
+    with destination.open("wb") as buffer:
+        buffer.write(content)
+    relative_path = f"uploads/{filename}"
+    return relative_path, destination
+
+
+def detect_duration_seconds(file_path: Path) -> Optional[int]:
+    if MutagenFile is None:
+        return None
+    try:
+        media_file = MutagenFile(file_path)
+    except Exception:
+        return None
+    if not media_file or not getattr(media_file, "info", None):
+        return None
+    length = getattr(media_file.info, "length", None)
+    if length is None:
+        return None
+    return max(0, int(length))
 
 
 async def get_actor(
@@ -148,7 +200,11 @@ def create_session(payload: SessionCreateRequest, actor: User = Depends(get_acto
     if actor.role != "host":
         raise HTTPException(status_code=403, detail="host token required")
     actor.name = payload.host_name
-    session = CollabSession(code=generate_code(db), host_id=actor.id)
+    session = CollabSession(
+        code=generate_code(db),
+        host_id=actor.id,
+        max_media_duration_seconds=payload.max_media_duration_seconds,
+    )
     actor.session = session
     db.add(session)
     db.commit()
@@ -170,6 +226,7 @@ def join_session(code: str, payload: JoinSessionRequest, db: Session = Depends(g
     return JoinSessionResponse(
         session_id=session.id,
         guest_token=guest.token,
+        max_media_duration_seconds=session.max_media_duration_seconds,
         playlist=serialize_playlist(session),
         playback_state=PlaybackStateModel(**serialize_playback(session)),
     )
@@ -184,27 +241,83 @@ def get_playlist(session_id: str, actor: User = Depends(get_actor), db: Session 
 @app.post("/sessions/{session_id}/playlist", response_model=Dict)
 async def add_playlist_item_endpoint(
     session_id: str,
-    payload: PlaylistMutationRequest,
+    request: Request,
     actor: User = Depends(get_actor),
     db: Session = Depends(get_db),
 ):
     session = ensure_session_membership(db, actor, session_id)
     if actor.role == "host":
-        if not payload.track_id or not payload.title or not payload.artist:
-            raise HTTPException(status_code=422, detail="track metadata required")
-        item = add_playlist_item(db, session, payload.track_id, payload.title, payload.artist)
+        try:
+            payload_data = await request.json()
+        except json.JSONDecodeError as exc:  # pragma: no cover - FastAPI already validates
+            raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+        track_id = (payload_data.get("track_id") or "").strip()
+        name = (payload_data.get("name") or "").strip()
+        media_payload = payload_data.get("media") or {}
+        encoded_media = media_payload.get("data")
+        filename = media_payload.get("filename", "")
+        media_type = media_payload.get("content_type")
+        duration_hint = payload_data.get("duration_seconds")
+        if not track_id or not name or not encoded_media:
+            raise HTTPException(status_code=422, detail="track_id, name, and media data are required")
+        duration_hint_value: Optional[int] = None
+        if duration_hint not in (None, ""):
+            try:
+                duration_hint_value = max(0, int(duration_hint))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="duration_seconds must be a positive integer") from exc
+        extension = resolve_media_extension(filename, media_type)
+        media_path = ""
+        destination: Optional[Path] = None
+        try:
+            try:
+                binary = base64.b64decode(encoded_media)
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail="media payload is not valid base64") from exc
+            media_path, destination = persist_media_bytes(binary, extension)
+            detected_duration = detect_duration_seconds(destination)
+            duration_seconds = detected_duration or duration_hint_value
+            if session.max_media_duration_seconds is not None:
+                if duration_seconds is None:
+                    raise HTTPException(status_code=422, detail="Unable to determine media duration for enforcement")
+                if duration_seconds > session.max_media_duration_seconds:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Track is longer than the allowed {session.max_media_duration_seconds} seconds",
+                    )
+            item = add_playlist_item(
+                db,
+                session,
+                track_id,
+                name,
+                media_path,
+                media_type,
+                duration_seconds,
+            )
+        except HTTPException:
+            if destination and destination.exists():
+                destination.unlink(missing_ok=True)
+            raise
+        except Exception as exc:
+            if destination and destination.exists():
+                destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=500, detail="Unable to store uploaded media") from exc
         db.refresh(session)
         await broadcast_playlist(session)
         return {
             "id": item.id,
             "track_id": item.track_id,
-            "title": item.title,
-            "artist": item.artist,
+            "name": item.title,
+            "media_url": f"/static/{item.media_path}",
+            "media_type": item.media_type,
+            "duration_seconds": item.duration_seconds,
             "position": item.position,
         }
-    request = create_request(db, session, actor, "add", payload.model_dump(exclude_none=True))
-    await broadcast_request_update(request)
-    return build_request_model(request).model_dump()
+    payload_data = await request.json()
+    payload = PlaylistMutationRequest(**payload_data)
+    request_entry = create_request(db, session, actor, "add", payload.model_dump(exclude_none=True))
+    await broadcast_request_update(request_entry)
+    return build_request_model(request_entry).model_dump()
 
 
 @app.patch("/sessions/{session_id}/playlist/{item_id}", response_model=Dict)

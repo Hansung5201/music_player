@@ -10,6 +10,7 @@ const state = {
   websocket: null,
   lastAuthPayload: null,
   selectedRole: "host",
+  maxDuration: null,
 };
 
 const tokenDisplay = document.getElementById("token-display");
@@ -31,6 +32,24 @@ const hostSessionChip = document.getElementById("host-session-chip");
 const guestSessionChip = document.getElementById("guest-session-chip");
 const hostTokenChip = document.getElementById("host-token-chip");
 const guestTokenChip = document.getElementById("guest-token-chip");
+const mediaPlayer = document.getElementById("media-player");
+const playerTrackName = document.getElementById("player-track-name");
+const playerTrackMeta = document.getElementById("player-track-meta");
+const playerDurationChip = document.getElementById("player-duration-chip");
+const playerCurrentTime = document.getElementById("player-current-time");
+const playerDuration = document.getElementById("player-duration");
+const playerSeek = document.getElementById("player-seek");
+const playerPlayButton = document.getElementById("player-play");
+const playerPauseButton = document.getElementById("player-pause");
+const playerPrevButton = document.getElementById("player-prev");
+const playerNextButton = document.getElementById("player-next");
+const mediaFileInput = document.getElementById("media-file-input");
+const durationField = document.getElementById("duration-seconds-input");
+const durationCopy = document.getElementById("detected-duration-copy");
+const maxDurationCopy = document.getElementById("max-duration-copy");
+const durationProbe = document.createElement("audio");
+durationProbe.preload = "metadata";
+let durationProbeUrl = null;
 
 function setBanner(message, tone = "info") {
   banner.textContent = message;
@@ -45,9 +64,28 @@ function setBanner(message, tone = "info") {
   setBanner.timeout = setTimeout(() => banner.classList.add("hidden"), 4000);
 }
 
+function formatDuration(totalSeconds) {
+  if (!Number.isFinite(totalSeconds)) return "0:00";
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}:${remaining.toString().padStart(2, "0")}`;
+}
+
+function updateMaxDurationCopy() {
+  if (!maxDurationCopy) return;
+  if (typeof state.maxDuration === "number" && state.maxDuration > 0) {
+    maxDurationCopy.textContent = `${state.maxDuration} seconds`;
+  } else {
+    maxDurationCopy.textContent = "No limit";
+  }
+}
+
 async function apiFetch(path, { method = "GET", body, headers = {}, skipToken = false } = {}) {
   const init = { method, headers: { ...headers } };
-  if (body !== undefined) {
+  if (body instanceof FormData) {
+    init.body = body;
+  } else if (body !== undefined) {
     init.body = JSON.stringify(body);
     init.headers["Content-Type"] = "application/json";
   }
@@ -68,12 +106,13 @@ function renderPlaylist() {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${index + 1}</td>
-      <td>${item.title}</td>
-      <td>${item.artist}</td>
-      <td>${item.track_id}</td>
+      <td><strong>${item.name}</strong><span class="table-meta">${item.track_id}</span></td>
+      <td>${item.duration_seconds ? formatDuration(item.duration_seconds) : "--"}</td>
+      <td>${item.media_type?.startsWith("video") ? "Video" : "Audio"}</td>
     `;
     playlistBody.appendChild(row);
   });
+  syncPlayerWithPlayback();
 }
 
 function renderRequests() {
@@ -95,13 +134,16 @@ function renderRequests() {
 function renderPlayback() {
   if (!state.playback) {
     playbackState.querySelectorAll("dd").forEach((node) => (node.textContent = "-"));
+    syncPlayerWithPlayback();
     return;
   }
   const rows = playbackState.querySelectorAll("dd");
   rows[0].textContent = state.playback.track_id || "-";
-  rows[1].textContent = `${state.playback.position_ms ?? 0} ms`;
+  const positionSeconds = Math.floor((state.playback.position_ms ?? 0) / 1000);
+  rows[1].textContent = `${formatDuration(positionSeconds)} (${state.playback.position_ms ?? 0} ms)`;
   rows[2].textContent = state.playback.state;
   rows[3].textContent = state.playback.updated_at;
+  syncPlayerWithPlayback();
 }
 
 function logActivity(line) {
@@ -115,6 +157,118 @@ function logActivity(line) {
   activityLog.scrollTop = activityLog.scrollHeight;
 }
 
+function getActiveTrack() {
+  if (!state.playback) return null;
+  return state.playlist.find((item) => item.track_id === state.playback.track_id) || null;
+}
+
+function syncPlayerControls() {
+  const disabled = !(state.role === "host" && state.sessionId);
+  [playerPlayButton, playerPauseButton, playerPrevButton, playerNextButton, playerSeek].forEach((node) => {
+    if (node) {
+      node.disabled = disabled;
+    }
+  });
+}
+
+function requireHostControl() {
+  if (state.role !== "host") {
+    setBanner("Only the host can control playback.", "error");
+    return false;
+  }
+  if (!state.sessionId) {
+    setBanner("Join or create a session first.", "error");
+    return false;
+  }
+  return true;
+}
+
+function syncPlayerWithPlayback() {
+  if (!mediaPlayer) return;
+  const playback = state.playback;
+  const track = getActiveTrack();
+  if (playerTrackName) {
+    playerTrackName.textContent = track ? track.name : "Upload a track to begin";
+  }
+  if (playerTrackMeta) {
+    playerTrackMeta.textContent = track ? track.track_id : "No track loaded";
+  }
+  if (playerDurationChip) {
+    playerDurationChip.textContent = track?.duration_seconds
+      ? formatDuration(track.duration_seconds)
+      : "--";
+  }
+  const positionSeconds = playback ? Math.floor((playback.position_ms ?? 0) / 1000) : 0;
+  if (playerCurrentTime) {
+    playerCurrentTime.textContent = formatDuration(positionSeconds);
+  }
+  const trackDuration = track?.duration_seconds ?? Math.floor(mediaPlayer.duration || 0);
+  if (playerDuration) {
+    playerDuration.textContent = trackDuration ? formatDuration(trackDuration) : "0:00";
+  }
+  if (playerSeek) {
+    playerSeek.max = trackDuration || 0;
+    playerSeek.value = Math.min(positionSeconds, Number(playerSeek.max) || 0);
+  }
+  if (track && mediaPlayer.dataset.currentTrack !== track.media_url) {
+    mediaPlayer.src = track.media_url;
+    mediaPlayer.dataset.currentTrack = track.media_url;
+  }
+  if (playback && playback.state === "playing" && track) {
+    const diff = Math.abs(mediaPlayer.currentTime - positionSeconds);
+    if (diff > 1) {
+      mediaPlayer.currentTime = positionSeconds;
+    }
+    mediaPlayer.play().catch(() => {});
+  } else {
+    mediaPlayer.pause();
+  }
+}
+
+function handleMediaSelection(event) {
+  if (!durationField || !durationCopy) return;
+  durationField.value = "";
+  durationCopy.textContent = "Select a file to auto-detect its runtime.";
+  const file = event.target.files && event.target.files[0];
+  if (!file) {
+    return;
+  }
+  durationCopy.textContent = "Detecting duration...";
+  if (durationProbeUrl) {
+    URL.revokeObjectURL(durationProbeUrl);
+  }
+  durationProbeUrl = URL.createObjectURL(file);
+  durationProbe.src = durationProbeUrl;
+  durationProbe.onloadedmetadata = () => {
+    if (Number.isFinite(durationProbe.duration)) {
+      const seconds = Math.round(durationProbe.duration);
+      durationField.value = seconds;
+      durationCopy.textContent = `Detected duration: ${formatDuration(seconds)}`;
+    } else {
+      durationCopy.textContent = "Couldn't read media length. You can still upload.";
+    }
+    URL.revokeObjectURL(durationProbeUrl);
+    durationProbeUrl = null;
+  };
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        const [, base64 = ""] = result.split(",");
+        resolve(base64);
+      } else {
+        reject(new Error("Unable to read file"));
+      }
+    };
+    reader.onerror = () => reject(reader.error || new Error("Unable to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 function syncFieldsets() {
   document.getElementById("host-session").disabled = state.role !== "host";
   document.getElementById("guest-session").disabled = state.role !== "guest";
@@ -122,12 +276,17 @@ function syncFieldsets() {
   document.getElementById("playlist-actions").disabled = !sessionReady;
   document.getElementById("playback-actions").disabled = !(sessionReady && state.role === "host");
   document.getElementById("connect-ws").disabled = !(sessionReady && state.token);
+  syncPlayerControls();
 }
 
-function updateSessionSummary({ session_id, playlist, playback_state, code }) {
+function updateSessionSummary({ session_id, playlist, playback_state, code, max_media_duration_seconds }) {
   const sessionChanged = session_id && session_id !== state.sessionId;
   state.sessionId = session_id || state.sessionId;
   state.inviteCode = code || state.inviteCode;
+  if (typeof max_media_duration_seconds !== "undefined") {
+    state.maxDuration = max_media_duration_seconds;
+    updateMaxDurationCopy();
+  }
   if (sessionChanged) {
     state.requests = [];
     renderRequests();
@@ -191,6 +350,11 @@ async function handleLogin(event) {
 async function handleCreateSession(event) {
   event.preventDefault();
   const body = Object.fromEntries(new FormData(event.target).entries());
+  if (!body.max_media_duration_seconds) {
+    delete body.max_media_duration_seconds;
+  } else {
+    body.max_media_duration_seconds = Number(body.max_media_duration_seconds);
+  }
   try {
     const response = await apiFetch("/sessions", { method: "POST", body });
     updateSessionSummary(response);
@@ -217,7 +381,13 @@ async function handleJoinSession(event) {
     state.token = response.guest_token;
     state.lastAuthPayload = response;
     tokenDisplay.textContent = JSON.stringify(response, null, 2);
-    updateSessionSummary({ session_id: response.session_id, playlist: response.playlist, playback_state: response.playback_state, code });
+    updateSessionSummary({
+      session_id: response.session_id,
+      playlist: response.playlist,
+      playback_state: response.playback_state,
+      code,
+      max_media_duration_seconds: response.max_media_duration_seconds,
+    });
     setBanner("Joined session.", "success");
     syncFieldsets();
     renderRoleCards();
@@ -229,11 +399,32 @@ async function handleJoinSession(event) {
 async function handleAddTrack(event) {
   event.preventDefault();
   if (!state.sessionId) return;
-  const body = Object.fromEntries(new FormData(event.target).entries());
+  const formValues = new FormData(event.target);
+  const file = mediaFileInput?.files?.[0];
+  if (!file) {
+    setBanner("Please attach an MP3 or MP4 file.", "error");
+    return;
+  }
   try {
-    await apiFetch(`/sessions/${state.sessionId}/playlist`, { method: "POST", body });
+    const media = await readFileAsBase64(file);
+    const payload = {
+      track_id: formValues.get("track_id"),
+      name: formValues.get("name"),
+      duration_seconds: formValues.get("duration_seconds")
+        ? Number(formValues.get("duration_seconds"))
+        : undefined,
+      media: {
+        filename: file.name,
+        content_type: file.type,
+        data: media,
+      },
+    };
+    await apiFetch(`/sessions/${state.sessionId}/playlist`, { method: "POST", body: payload });
     setBanner("Track submitted.", "success");
     event.target.reset();
+    if (durationCopy) {
+      durationCopy.textContent = "Select a file to auto-detect its runtime.";
+    }
   } catch (error) {
     setBanner(error.message, "error");
   }
@@ -254,6 +445,26 @@ async function handleGuestRequest(event) {
   }
 }
 
+async function dispatchPlaybackCommand(payload) {
+  if (!state.sessionId) return;
+  if (!state.websocket) {
+    await apiFetch(`/sessions/${state.sessionId}/playback`, { method: "POST", body: payload });
+  } else {
+    state.websocket.send(
+      JSON.stringify({ type: "playback_command", payload })
+    );
+  }
+}
+
+async function sendCommandWithBanner(payload) {
+  try {
+    await dispatchPlaybackCommand(payload);
+    setBanner("Playback command dispatched.", "success");
+  } catch (error) {
+    setBanner(error.message, "error");
+  }
+}
+
 async function handlePlayback(event) {
   event.preventDefault();
   if (!state.sessionId) return;
@@ -263,18 +474,7 @@ async function handlePlayback(event) {
   };
   if (formData.track_id) payload.track_id = formData.track_id;
   if (formData.position_ms) payload.position_ms = Number(formData.position_ms);
-  try {
-    if (!state.websocket) {
-      await apiFetch(`/sessions/${state.sessionId}/playback`, { method: "POST", body: payload });
-    } else {
-      state.websocket.send(
-        JSON.stringify({ type: "playback_command", payload })
-      );
-    }
-    setBanner("Playback command dispatched.", "success");
-  } catch (error) {
-    setBanner(error.message, "error");
-  }
+  await sendCommandWithBanner(payload);
 }
 
 function connectWebSocket() {
@@ -339,6 +539,67 @@ function registerListeners() {
   });
 }
 
+function registerPlayerControls() {
+  if (mediaFileInput) {
+    mediaFileInput.addEventListener("change", handleMediaSelection);
+  }
+  if (playerPlayButton) {
+    playerPlayButton.addEventListener("click", () => {
+      if (!requireHostControl()) return;
+      const trackId = state.playback?.track_id || state.playlist[0]?.track_id;
+      if (!trackId) {
+        setBanner("Upload a track first.", "error");
+        return;
+      }
+      const position = Math.round(mediaPlayer?.currentTime || 0) * 1000;
+      sendCommandWithBanner({ action: "play", track_id: trackId, position_ms: position });
+    });
+  }
+  if (playerPauseButton) {
+    playerPauseButton.addEventListener("click", () => {
+      if (!requireHostControl()) return;
+      const trackId = state.playback?.track_id || state.playlist[0]?.track_id;
+      if (!trackId) return;
+      sendCommandWithBanner({ action: "pause", track_id: trackId });
+    });
+  }
+  if (playerPrevButton) {
+    playerPrevButton.addEventListener("click", () => {
+      if (!requireHostControl()) return;
+      sendCommandWithBanner({ action: "skip_prev" });
+    });
+  }
+  if (playerNextButton) {
+    playerNextButton.addEventListener("click", () => {
+      if (!requireHostControl()) return;
+      sendCommandWithBanner({ action: "skip_next" });
+    });
+  }
+  if (playerSeek) {
+    playerSeek.addEventListener("change", (event) => {
+      if (!requireHostControl()) return;
+      const seconds = Number(event.target.value);
+      if (!Number.isFinite(seconds)) return;
+      const trackId = state.playback?.track_id;
+      if (!trackId) return;
+      playerCurrentTime.textContent = formatDuration(seconds);
+      sendCommandWithBanner({ action: "seek", track_id: trackId, position_ms: seconds * 1000 });
+    });
+  }
+  if (mediaPlayer) {
+    mediaPlayer.addEventListener("timeupdate", () => {
+      if (playerCurrentTime) {
+        playerCurrentTime.textContent = formatDuration(Math.floor(mediaPlayer.currentTime));
+      }
+      const isActive = typeof playerSeek?.matches === "function" && playerSeek.matches(":active");
+      if (playerSeek && !isActive) {
+        playerSeek.value = Math.floor(mediaPlayer.currentTime);
+      }
+    });
+    mediaPlayer.addEventListener("loadedmetadata", syncPlayerWithPlayback);
+  }
+}
+
 function renderRoleCards() {
   if (selectedRoleCopy) {
     selectedRoleCopy.textContent = state.selectedRole === "host" ? "Host console" : "Guest console";
@@ -379,8 +640,10 @@ function renderRoleCards() {
 }
 
 registerListeners();
+registerPlayerControls();
 syncFieldsets();
 renderPlaylist();
 renderRequests();
 renderPlayback();
 renderRoleCards();
+updateMaxDurationCopy();

@@ -16,8 +16,10 @@ class PlaybackStateModel(BaseModel):
 class PlaylistItemModel(BaseModel):
     id: str
     track_id: str
-    title: str
-    artist: str
+    name: str
+    media_url: str
+    media_type: str
+    duration_seconds: Optional[int]
     position: int
 
 
@@ -34,12 +36,14 @@ class LoginResponse(BaseModel):
 
 class SessionCreateRequest(BaseModel):
     host_name: str
+    max_media_duration_seconds: Optional[int] = Field(default=None, gt=0)
 
 
 class SessionResponse(BaseModel):
     session_id: str
     code: str
     host_token: Optional[str]
+    max_media_duration_seconds: Optional[int]
     playlist: List[PlaylistItemModel]
     playback_state: PlaybackStateModel
 
@@ -51,14 +55,16 @@ class JoinSessionRequest(BaseModel):
 class JoinSessionResponse(BaseModel):
     session_id: str
     guest_token: str
+    max_media_duration_seconds: Optional[int]
     playlist: List[PlaylistItemModel]
     playback_state: PlaybackStateModel
 
 
 class PlaylistMutationRequest(BaseModel):
     track_id: Optional[str] = None
-    title: Optional[str] = None
-    artist: Optional[str] = None
+    name: Optional[str] = None
+    duration_seconds: Optional[int] = Field(default=None, gt=0)
+    media_url: Optional[str] = None
     new_position: Optional[int] = Field(default=None, ge=0)
 
 
