@@ -52,12 +52,6 @@ WebSocket clients receive `playback_state`, `playlist_update`, and `request_upda
 to submit collaboration intents. See `docs/CLIENT_SYNC.md` for the drift-correction algorithm and the expected client-side
 player loop defined in Step 6 of the plan.
 
-## Containerized deployment
-
-To satisfy the deployment expectations in Step 3 of `PLAN.txt`, this repository includes a Dockerfile, docker-compose stack,
-and Nginx reverse proxy configuration. See `docs/DEPLOYMENT.md` for step-by-step instructions on building the image, launching
-the API + PostgreSQL + proxy trio, and overriding environment variables for production rollouts.
-
 ## Testing
 
 ```
