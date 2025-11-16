@@ -1,0 +1,111 @@
+Sequential Collaborative Music Player Plan
+=========================================
+
+Step 0. Execution Environment Rules
+-----------------------------------
+- Entire system must run on Python (e.g., FastAPI backend, orchestration scripts, tooling) so deployments have a single runtime dependency.
+- All Python packages or auxiliary binaries that require downloading have to be listed in text manifests before execution (e.g., `requirements.txt` for pip packages, `external_tools.txt` for utilities like FFmpeg).
+- After prerequisites are installed, a single command-line entry point (e.g., `python -m app.main`) launches the full GUI, where every configuration and playback/session control is available without editing files manually.
+
+Step 1. Project Overview & Goals
+--------------------------------
+- Deliver a collaborative, real-time music player with a designated host controlling playback while guests join synchronized sessions.
+- Enable playlist collaboration through structured guest requests and host approvals.
+- Prioritize low-latency synchronization, strict permissions, and scalability for concurrent sessions.
+
+Step 2. Host / Guest Flow Specification
+---------------------------------------
+### Host Responsibilities
+- Playback control: play, pause, seek (mm:ss precision), skip next/previous.
+- Playlist management: reorder tracks, add new tracks from catalogs/URLs, remove tracks.
+- Approve/deny guest playlist requests, broadcasting outcomes to all clients.
+
+### Guest Capabilities
+- Join sessions via invite code/shareable link and subscribe to synchronized playback state.
+- Submit playlist change requests (add, reorder suggestions, removal suggestions) with pending-state UI feedback.
+- Monitor request status (pending/approved/denied) via WebSocket notifications.
+- Client synchronization workflow:
+  1. Authenticate/join session through REST to obtain metadata and permissions.
+  2. Open WebSocket for continuous playback updates and request responses.
+  3. Adjust local playback (track ID, timestamp, state) with drift correction logic.
+
+Step 3. Technology Stack & Architecture
+---------------------------------------
+- Backend: Python FastAPI serving REST endpoints and WebSocket connections.
+- Realtime layer: FastAPI WebSocket routes using asyncio broadcast loops.
+- Synchronization algorithm: server maintains authoritative `current_track_id`, `position_ms`, `play_state`, `updated_at` timestamp.
+  - Clients compute elapsed time since `updated_at` and adjust playback when `play_state` is playing.
+  - Periodic resync (e.g., every 10 seconds) corrects drift beyond ±200 ms.
+- Data layer: SQLAlchemy ORM with SQLite for dev/local and PostgreSQL for production storing users, sessions, playlists, track metadata, request logs.
+- Deployment: containerized services (Docker) with TLS-terminating reverse proxy (e.g., Nginx).
+
+Step 4. Protocol & API Specification
+------------------------------------
+### REST Endpoints
+- `POST /auth/login`: issue JWT session tokens.
+- `POST /sessions`: create a new session (host only).
+- `POST /sessions/{code}/join`: guest joins via invite code; returns session token + initial state.
+- `GET /sessions/{id}/playlist`: retrieve playlist ordering.
+- `POST /sessions/{id}/playlist`: host adds track immediately; guests create request.
+- `PATCH /sessions/{id}/playlist/{item_id}`: reorder/edit metadata (host direct, guest via request).
+- `DELETE /sessions/{id}/playlist/{item_id}`: remove track.
+- `POST /sessions/{id}/requests`: guest submits playlist modification request payload.
+- `POST /requests/{id}/approve` / `/deny`: host decisions.
+
+### WebSocket Channel `/ws/sessions/{id}` (authenticated)
+- Broadcast messages:
+  - `playback_state`: `{ "track_id": str, "position_ms": int, "state": "playing"|"paused", "updated_at": ISO8601 }`.
+  - `playlist_update`: diff or full snapshot after approved change.
+  - `request_update`: `{ "request_id": str, "status": "pending"|"approved"|"denied", "payload": {...} }`.
+- Guest messages:
+  - `request_playlist_change`: send proposed actions; server records pending status and notifies host.
+  - `sync_ack`: optional diagnostic acknowledgement.
+- Host messages:
+  - `playback_command`: `{ "action": "play"|"pause"|"seek"|"skip_next"|"skip_prev", "position_ms"? }`.
+  - `approve_request` / `deny_request`: resolve guest proposals.
+
+Step 5. Playlist Collaboration Flow
+-----------------------------------
+- Request lifecycle: `pending` → (`approved` | `denied`).
+- Guests submit via REST or WebSocket; server stores requester, track info, desired position.
+- Host UI lists pending requests; actions call REST/WebSocket commands.
+- Approval path:
+  - Apply playlist mutation atomically in DB transaction.
+  - Emit `playlist_update` + `request_update` to all clients.
+  - Include track metadata for additions; provide ordering array for reorders.
+- Denial path:
+  - Update request record with denial reason.
+  - Broadcast `request_update` for transparency.
+
+Step 6. Audio Player Client Logic
+---------------------------------
+- Maintain local audio element/player per client.
+- On `playback_state`, compute drift vs local clock; adjust playback (seek or rate correction) when > tolerance.
+- Pause/resume locally according to `state` and `position_ms`.
+- For minor drift (<100 ms), apply gradual catch-up rather than abrupt seeks.
+- Periodic resync (every 10 seconds) via REST poll or scheduled WebSocket heartbeat containing authoritative timestamp.
+- Handle track transitions by verifying with server before advancing locally.
+
+Step 7. Security & Scalability Considerations
+---------------------------------------------
+- Authentication: JWT tokens with expiration plus refresh for long sessions.
+- Authorization: enforce host/guest role claims per endpoint/action.
+- Scope tokens to session IDs to prevent cross-session access.
+- Transport security: HTTPS/WSS with TLS and CSRF mitigation (double-submit cookie) for REST clients.
+- Rate limit guest request submissions to prevent spam.
+- Scalability: use Redis pub/sub or similar broker to distribute playback updates across FastAPI instances; optionally store playback state in Redis.
+- Support horizontal scaling with load balancer and WebSocket session affinity/consistent hashing.
+
+Step 8. Testing Strategy & Future TODOs
+---------------------------------------
+### Testing Strategy
+- Unit tests using FastAPI TestClient for auth, playlist CRUD, and request lifecycle.
+- Integration tests with in-memory SQLite and WebSocket clients validating synchronization protocol.
+- Synchronization accuracy tests simulating drift to ensure correction within tolerance thresholds.
+- Load tests (e.g., Locust) targeting WebSocket broadcast throughput.
+
+### TODOs
+- Finalize detailed database schema (tables, indexes, migrations).
+- Design client UI wireframes/states for host vs guest views.
+- Prototype audio element integration with synchronization hooks.
+- Implement metrics/logging (Prometheus/Grafana) to monitor drift/latency.
