@@ -1,0 +1,237 @@
+:root {
+  --bg: #0f172a;
+  --panel: #1e293b;
+  --panel-accent: #2563eb;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --success: #22c55e;
+  --danger: #ef4444;
+  --warning: #facc15;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 1rem 4rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  text-align: center;
+  padding: 2rem 0 1rem;
+}
+
+h1 {
+  margin-bottom: 0.5rem;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.panel {
+  background: var(--panel);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 20px 35px rgba(15, 23, 42, 0.4);
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+fieldset {
+  border: 1px solid rgba(226, 232, 240, 0.2);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+fieldset[disabled] {
+  opacity: 0.5;
+}
+
+legend {
+  padding: 0 0.5rem;
+  font-weight: 600;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.95rem;
+}
+
+input,
+select,
+textarea,
+button {
+  font-size: 1rem;
+  border-radius: 8px;
+  border: none;
+  padding: 0.65rem;
+}
+
+input,
+select,
+textarea {
+  background: rgba(15, 23, 42, 0.8);
+  color: var(--text);
+  border: 1px solid rgba(226, 232, 240, 0.2);
+}
+
+button {
+  cursor: pointer;
+  background: var(--panel-accent);
+  color: white;
+  transition: opacity 0.2s ease;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.9rem 1.2rem;
+  font-size: 1.1rem;
+}
+
+.help-text {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.token-display,
+.activity-log {
+  background: rgba(15, 23, 42, 0.85);
+  border-radius: 12px;
+  padding: 1rem;
+  min-height: 3rem;
+  border: 1px solid rgba(226, 232, 240, 0.1);
+  overflow-x: auto;
+}
+
+.two-column {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.status-grid,
+.data-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 1rem;
+}
+
+.status-grid h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.status-grid p {
+  margin: 0.3rem 0 0;
+  font-size: 1.1rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.1);
+}
+
+.request-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.request-list li {
+  padding: 0.7rem;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(226, 232, 240, 0.1);
+}
+
+.request-list li[data-status='approved'] {
+  border-color: var(--success);
+}
+
+.request-list li[data-status='denied'] {
+  border-color: var(--danger);
+}
+
+.playback-state {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem 1rem;
+}
+
+.playback-state div {
+  background: rgba(15, 23, 42, 0.7);
+  border-radius: 10px;
+  padding: 0.6rem;
+}
+
+.playback-state dt {
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: 0.8rem 1.5rem;
+  background: rgba(37, 99, 235, 0.95);
+  color: white;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  transition: transform 0.3s ease;
+}
+
+.banner.hidden {
+  transform: translateY(110%);
+}
+
+#ws-status.connected {
+  color: var(--success);
+}
+
+#ws-status.error {
+  color: var(--danger);
+}
+
+.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+textarea {
+  resize: vertical;
+}
