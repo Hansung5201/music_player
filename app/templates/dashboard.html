@@ -17,6 +17,87 @@
     </header>
 
     <main>
+      <section class="panel role-chooser">
+        <h2>Pick a console</h2>
+        <p class="help-text">
+          Choose the workflow that matches your task. Selecting a console will
+          pre-fill the authentication form and surface the right controls for the
+          role.
+        </p>
+        <div class="role-grid">
+          <button
+            type="button"
+            class="role-card"
+            data-role-select="host"
+            id="host-card"
+          >
+            <div class="role-card__header">
+              <div>
+                <span class="role-label">Host console</span>
+                <p class="role-subtitle">
+                  Create sessions, curate the playlist, and steer playback.
+                </p>
+              </div>
+              <span class="role-chip">Lead</span>
+            </div>
+            <ul>
+              <li>Generate a host token and create invite codes.</li>
+              <li>Approve or reject playlist requests.</li>
+              <li>Send live playback commands or broadcast WebSocket events.</li>
+            </ul>
+            <dl class="role-stats">
+              <div>
+                <dt>Status</dt>
+                <dd id="host-status">Not authenticated</dd>
+              </div>
+              <div>
+                <dt>Session</dt>
+                <dd id="host-session-chip">No session</dd>
+              </div>
+              <div>
+                <dt>Token</dt>
+                <dd id="host-token-chip">Tap card &amp; login</dd>
+              </div>
+            </dl>
+          </button>
+          <button
+            type="button"
+            class="role-card"
+            data-role-select="guest"
+            id="guest-card"
+          >
+            <div class="role-card__header">
+              <div>
+                <span class="role-label">Guest console</span>
+                <p class="role-subtitle">
+                  Join a session, drop requests, and stay synced with playback.
+                </p>
+              </div>
+              <span class="role-chip role-chip--accent">Join</span>
+            </div>
+            <ul>
+              <li>Request songs and vote on the running order.</li>
+              <li>Watch the playlist update in real time.</li>
+              <li>Mirror playback state through the WebSocket channel.</li>
+            </ul>
+            <dl class="role-stats">
+              <div>
+                <dt>Status</dt>
+                <dd id="guest-status">Not authenticated</dd>
+              </div>
+              <div>
+                <dt>Session</dt>
+                <dd id="guest-session-chip">No session</dd>
+              </div>
+              <div>
+                <dt>Token</dt>
+                <dd id="guest-token-chip">Tap card &amp; login</dd>
+              </div>
+            </dl>
+          </button>
+        </div>
+      </section>
+
       <section class="panel">
         <h2>1. Authenticate</h2>
         <form id="login-form" class="stacked">
@@ -24,13 +105,11 @@
             Display name
             <input type="text" name="name" placeholder="DJ Pixel" required />
           </label>
-          <label>
-            Role
-            <select name="role">
-              <option value="host">Host</option>
-              <option value="guest">Guest</option>
-            </select>
-          </label>
+          <input type="hidden" name="role" id="role-input" value="host" />
+          <p class="help-text">
+            Currently preparing the <strong id="selected-role-copy">Host console</strong>.
+            Switch cards above to toggle roles before logging in.
+          </p>
           <button type="submit">Generate token</button>
         </form>
         <p class="help-text">

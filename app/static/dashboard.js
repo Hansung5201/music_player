@@ -9,6 +9,7 @@ const state = {
   playback: null,
   websocket: null,
   lastAuthPayload: null,
+  selectedRole: "host",
 };
 
 const tokenDisplay = document.getElementById("token-display");
@@ -21,6 +22,15 @@ const requestList = document.getElementById("request-list");
 const playbackState = document.getElementById("playback-state");
 const banner = document.getElementById("status-banner");
 const activityLog = document.getElementById("activity-log");
+const roleInput = document.getElementById("role-input");
+const selectedRoleCopy = document.getElementById("selected-role-copy");
+const roleCards = document.querySelectorAll("[data-role-select]");
+const hostStatus = document.getElementById("host-status");
+const guestStatus = document.getElementById("guest-status");
+const hostSessionChip = document.getElementById("host-session-chip");
+const guestSessionChip = document.getElementById("guest-session-chip");
+const hostTokenChip = document.getElementById("host-token-chip");
+const guestTokenChip = document.getElementById("guest-token-chip");
 
 function setBanner(message, tone = "info") {
   banner.textContent = message;
@@ -133,6 +143,7 @@ function updateSessionSummary({ session_id, playlist, playback_state, code }) {
   sessionDisplay.textContent = state.sessionId || "-";
   inviteDisplay.textContent = state.inviteCode || "-";
   syncFieldsets();
+  renderRoleCards();
 }
 
 function updateRequestsList(requestPayload) {
@@ -163,10 +174,15 @@ async function handleLogin(event) {
     state.userId = response.user_id;
     state.role = response.role;
     state.lastAuthPayload = response;
+    state.selectedRole = response.role;
+    if (roleInput) {
+      roleInput.value = response.role;
+    }
     tokenDisplay.textContent = JSON.stringify(response, null, 2);
     roleDisplay.textContent = response.role;
     setBanner(`Logged in as ${response.role}.`, "success");
     syncFieldsets();
+    renderRoleCards();
   } catch (error) {
     setBanner(error.message, "error");
   }
@@ -204,6 +220,7 @@ async function handleJoinSession(event) {
     updateSessionSummary({ session_id: response.session_id, playlist: response.playlist, playback_state: response.playback_state, code });
     setBanner("Joined session.", "success");
     syncFieldsets();
+    renderRoleCards();
   } catch (error) {
     setBanner(error.message, "error");
   }
@@ -310,6 +327,55 @@ function registerListeners() {
   document.getElementById("guest-request-form").addEventListener("submit", handleGuestRequest);
   document.getElementById("playback-form").addEventListener("submit", handlePlayback);
   document.getElementById("connect-ws").addEventListener("click", connectWebSocket);
+  roleCards.forEach((card) => {
+    card.addEventListener("click", () => {
+      const role = card.dataset.roleSelect;
+      state.selectedRole = role;
+      if (roleInput) {
+        roleInput.value = role;
+      }
+      renderRoleCards();
+    });
+  });
+}
+
+function renderRoleCards() {
+  if (selectedRoleCopy) {
+    selectedRoleCopy.textContent = state.selectedRole === "host" ? "Host console" : "Guest console";
+  }
+  roleCards.forEach((card) => {
+    const isActive = card.dataset.roleSelect === state.selectedRole;
+    card.classList.toggle("active", isActive);
+    card.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  if (hostStatus) {
+    hostStatus.textContent =
+      state.role === "host" && state.userId
+        ? `Ready (user #${state.userId})`
+        : state.selectedRole === "host"
+        ? "Tap login to get started"
+        : "Not authenticated";
+  }
+  if (guestStatus) {
+    guestStatus.textContent =
+      state.role === "guest" && state.userId
+        ? `Ready (user #${state.userId})`
+        : state.selectedRole === "guest"
+        ? "Tap login to get started"
+        : "Not authenticated";
+  }
+  if (hostSessionChip) {
+    hostSessionChip.textContent = state.role === "host" && state.sessionId ? state.sessionId : "No session";
+  }
+  if (guestSessionChip) {
+    guestSessionChip.textContent = state.role === "guest" && state.sessionId ? state.sessionId : "No session";
+  }
+  if (hostTokenChip) {
+    hostTokenChip.textContent = state.role === "host" && state.token ? "Token ready" : "Tap card & login";
+  }
+  if (guestTokenChip) {
+    guestTokenChip.textContent = state.role === "guest" && state.token ? "Token ready" : "Tap card & login";
+  }
 }
 
 registerListeners();
@@ -317,3 +383,4 @@ syncFieldsets();
 renderPlaylist();
 renderRequests();
 renderPlayback();
+renderRoleCards();
