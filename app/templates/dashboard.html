@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collaborative Music Player</title>
+    <link rel="stylesheet" href="/static/dashboard.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Collaborative Music Player</h1>
+      <p>
+        Use this dashboard to log in as a host or guest, create or join sessions,
+        manage the playlist, and observe playback synchronization events in real
+        time.
+      </p>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>1. Authenticate</h2>
+        <form id="login-form" class="stacked">
+          <label>
+            Display name
+            <input type="text" name="name" placeholder="DJ Pixel" required />
+          </label>
+          <label>
+            Role
+            <select name="role">
+              <option value="host">Host</option>
+              <option value="guest">Guest</option>
+            </select>
+          </label>
+          <button type="submit">Generate token</button>
+        </form>
+        <p class="help-text">
+          Tokens are ephemeral and scoped to the selected role. Copy/paste them
+          for API calls if you prefer using cURL or Postman.
+        </p>
+        <pre id="token-display" class="token-display">Token will appear here.</pre>
+      </section>
+
+      <section class="panel">
+        <h2>2. Session Lifecycle</h2>
+        <div class="two-column">
+          <fieldset id="host-session" disabled>
+            <legend>Create session (host)</legend>
+            <form id="create-session-form" class="stacked">
+              <label>
+                Session title
+                <input type="text" name="host_name" placeholder="Friday Jam" required />
+              </label>
+              <button type="submit">Create session</button>
+            </form>
+          </fieldset>
+          <fieldset id="guest-session" disabled>
+            <legend>Join session (guest)</legend>
+            <form id="join-session-form" class="stacked">
+              <label>
+                Invite code
+                <input type="text" name="code" placeholder="ABC123" required />
+              </label>
+              <label>
+                Display name
+                <input type="text" name="guest_name" placeholder="Synth Cat" required />
+              </label>
+              <button type="submit">Join session</button>
+            </form>
+          </fieldset>
+        </div>
+        <div class="status-grid">
+          <div>
+            <h3>Session ID</h3>
+            <p id="session-id">-</p>
+          </div>
+          <div>
+            <h3>Invite code</h3>
+            <p id="invite-code">-</p>
+          </div>
+          <div>
+            <h3>Role</h3>
+            <p id="role-display">-</p>
+          </div>
+          <div>
+            <h3>WebSocket</h3>
+            <p id="ws-status">Disconnected</p>
+          </div>
+        </div>
+        <button id="connect-ws" class="primary" disabled>Connect WebSocket</button>
+      </section>
+
+      <section class="panel">
+        <h2>3. Playlist & Playback</h2>
+        <div class="two-column">
+          <fieldset id="playlist-actions" disabled>
+            <legend>Playlist actions</legend>
+            <form id="add-track-form" class="stacked">
+              <label>
+                Track ID
+                <input type="text" name="track_id" placeholder="track-123" required />
+              </label>
+              <label>
+                Title
+                <input type="text" name="title" placeholder="Future Funk" required />
+              </label>
+              <label>
+                Artist
+                <input type="text" name="artist" placeholder="Neon Tiger" required />
+              </label>
+              <button type="submit">Add track</button>
+            </form>
+            <form id="guest-request-form" class="stacked">
+              <label>
+                Request payload (JSON)
+                <textarea name="payload" rows="4" placeholder='{"request_type":"add","payload":{"track_id":"t42","title":"Song","artist":"Artist"}}'></textarea>
+              </label>
+              <button type="submit">Submit custom request</button>
+            </form>
+          </fieldset>
+          <fieldset id="playback-actions" disabled>
+            <legend>Playback commands (host)</legend>
+            <form id="playback-form" class="stacked">
+              <label>
+                Action
+                <select name="action">
+                  <option value="play">Play</option>
+                  <option value="pause">Pause</option>
+                  <option value="seek">Seek</option>
+                  <option value="skip_next">Skip Next</option>
+                  <option value="skip_prev">Skip Previous</option>
+                </select>
+              </label>
+              <label>
+                Track ID (optional)
+                <input type="text" name="track_id" placeholder="track-123" />
+              </label>
+              <label>
+                Position (ms)
+                <input type="number" name="position_ms" min="0" step="100" />
+              </label>
+              <button type="submit">Send command</button>
+            </form>
+          </fieldset>
+        </div>
+        <div class="data-grid">
+          <div>
+            <h3>Playlist</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Track</th>
+                  <th>Artist</th>
+                  <th>ID</th>
+                </tr>
+              </thead>
+              <tbody id="playlist-body"></tbody>
+            </table>
+          </div>
+          <div>
+            <h3>Requests</h3>
+            <ul id="request-list" class="request-list"></ul>
+          </div>
+          <div>
+            <h3>Playback state</h3>
+            <dl id="playback-state" class="playback-state">
+              <div>
+                <dt>Track</dt>
+                <dd>-</dd>
+              </div>
+              <div>
+                <dt>Position</dt>
+                <dd>-</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>-</dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd>-</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>4. Activity log</h2>
+        <pre id="activity-log" class="activity-log">Waiting for events...</pre>
+      </section>
+    </main>
+
+    <div id="status-banner" class="banner">Ready.</div>
+
+    <script src="/static/dashboard.js" defer></script>
+  </body>
+</html>

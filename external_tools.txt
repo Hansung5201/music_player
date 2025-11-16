@@ -1,0 +1,3 @@
+# External binaries required by the orchestration or playback stack.
+# Install these before running the unified entry point.
+ffmpeg  # audio transcoding and waveform previews

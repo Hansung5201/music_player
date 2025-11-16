@@ -37,7 +37,7 @@ Step 3. Technology Stack & Architecture
   - Clients compute elapsed time since `updated_at` and adjust playback when `play_state` is playing.
   - Periodic resync (e.g., every 10 seconds) corrects drift beyond ±200 ms.
 - Data layer: SQLAlchemy ORM with SQLite for dev/local and PostgreSQL for production storing users, sessions, playlists, track metadata, request logs.
-- Deployment: containerized services (Docker) with TLS-terminating reverse proxy (e.g., Nginx).
+- Deployment: native FastAPI service (e.g., Uvicorn) with optional TLS-terminating reverse proxy for production.
 
 Step 4. Protocol & API Specification
 ------------------------------------

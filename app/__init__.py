@@ -1,0 +1,1 @@
+"""Collaborative music player package."""
