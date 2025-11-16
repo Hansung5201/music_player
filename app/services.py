@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -21,8 +21,10 @@ def serialize_playlist(session: CollabSession) -> List[Dict]:
         {
             "id": item.id,
             "track_id": item.track_id,
-            "title": item.title,
-            "artist": item.artist,
+            "name": item.title,
+            "media_url": f"/static/{item.media_path.lstrip('/')}",
+            "media_type": item.media_type,
+            "duration_seconds": item.duration_seconds,
             "position": item.position,
         }
         for item in items
@@ -43,6 +45,7 @@ def build_session_response(session: CollabSession, include_host_token: bool = Fa
         session_id=session.id,
         code=session.code,
         host_token=session.host.token if include_host_token else None,
+        max_media_duration_seconds=session.max_media_duration_seconds,
         playlist=serialize_playlist(session),
         playback_state=PlaybackStateModel(**serialize_playback(session)),
     )
@@ -92,15 +95,19 @@ def add_playlist_item(
     db: Session,
     session: CollabSession,
     track_id: str,
-    title: str,
-    artist: str,
+    name: str,
+    media_path: str,
+    media_type: str,
+    duration_seconds: Optional[int],
 ) -> PlaylistItem:
     position = len(session.playlist_items)
     item = PlaylistItem(
         session_id=session.id,
         track_id=track_id,
-        title=title,
-        artist=artist,
+        title=name,
+        media_path=media_path,
+        media_type=media_type,
+        duration_seconds=duration_seconds,
         position=position,
     )
     db.add(item)
@@ -143,7 +150,15 @@ def remove_playlist_item(db: Session, session: CollabSession, item_id: str) -> N
 def apply_request(db: Session, session: CollabSession, request: PlaylistRequestEntry) -> None:
     payload = request.payload
     if request.request_type == "add":
-        add_playlist_item(db, session, payload["track_id"], payload["title"], payload["artist"])
+        add_playlist_item(
+            db,
+            session,
+            payload["track_id"],
+            payload["name"],
+            payload["media_path"],
+            payload["media_type"],
+            payload.get("duration_seconds"),
+        )
     elif request.request_type == "reorder":
         reorder_playlist(db, session, payload["item_id"], payload["new_position"])
     elif request.request_type == "remove":
